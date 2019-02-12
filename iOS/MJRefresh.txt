@@ -1,6 +1,6 @@
 MJRefresh
 
-catagory：
+CATAGORY：
 NSBundle（MJRefresh）
 	作用：从pod的bundle中获取资源
 	1、提供pod的bundle获取方法：使用bundleForClass获取框架类的bundle，之后找到框架中对应的bundle文件的path
@@ -8,3 +8,51 @@ NSBundle（MJRefresh）
 	3、从bundle中读取国际化本地字符串：【bundle localizedStringForKey：value：table】
 
 UIScrollViwe（MJExtension）
+	作用：为了适配iOS11的adjuestedContentInset，如果iOS11的话返回adjustedContentInset，否则返回contentInset，并从contentInset中获取数据，另外还提供了从contentOff、contentSize中获取数据。（将改动集成自己的extension，值得借鉴）
+
+UIScrollView（MJRefresh）
+	作用：为UIScrollView添加了header、footer(是insert进去的而不是直接对table的header和footer赋值)，提供了scrollview的totalDataCount接口和reloadDatablock，并且将UITableView和UICollectionView的reloadData通过swizzling方法将block传入。
+
+UIView（MJExtension）
+	作用：为UIView提供直接读写x、y、w、h、size、original方法，避免需要重新创建frame之后修改frame再重新赋值的麻烦（值得借鉴）
+
+BASE：
+MJRefreshComponent
+	作用：header、footer的父类，用于和scrollview绑定，并由刷新状态控制刷新过程。提供了刷新状态，刷新前后回调、开始结束刷新、子控件的准备、contentOffset/size/panState状态变化回调、根据拉拽百分比改变透明度。
+	1、提供了一个UILabel的扩展。用于构造一个默认样式的label，可获取其字体大小
+	2、初始化方法中，调用了prepare准备方法，并把状态设置为idle
+	3、willMoveToSuperView时，如果父view不是scrollview，什么也不做，如果是的话，弱引用父view，获取inset，并KVO其contentOffset/Size/panState，在KVO触发方法中分别调用change回调，
+	4、在开始刷新方法中，把状态设置为refreshing，在结束刷新方法中，状态设为idle。
+
+MJRefreshHeader
+	作用：所有header的父类，提供了带block或者target-action的工厂方法、最后刷新时间、忽略contentTop值
+	1、在工厂方法中，存储block。
+	2、在prepare方法中，设置高度和刷新时间key
+	3、在contentOffsetChange方法中：
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

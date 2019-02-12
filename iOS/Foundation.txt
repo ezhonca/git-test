@@ -1,3 +1,5 @@
 Foundation
 
+NSUUID：表示全局唯一标识符的类【NSUUID uuid】，重复概率为170亿分之一。
+
 NSProgress:表示进度的类，用totalCount和completedCount来控制进度，可通过KVO内部fractedCompleted属性来自动查看完成率。还可把任务量分配给子进度。当处理文件时可用于显示处理速度，处理量等自动表示。

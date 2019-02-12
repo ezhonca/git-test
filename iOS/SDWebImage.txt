@@ -115,10 +115,6 @@ SDWebImagePrefetcher：
 SDWebImageTransition：
 	图片转场类：提供各种图片转场的option，duration为0.5
 
-
-
-
-
 Catagory:
 NSData (ImageContentType):
 	NSData分类：可用于从NSData中获取图片的类型（GIF、PNG等），可用于图片类型CFStringRef和自定义SDImageFormat之间的转换
@@ -154,7 +150,8 @@ UIImageView (HighlightedWebCache)
 	UIImageView的扩展，专门用于设置highlight图片，在setImageBlock:中设置对highlight图片进行赋值即可
 UIButton (WebCache)
 	UIbutton的扩展，使用UIView的webCache核心方法，在setImageBlock:中设置对不同的图片以及不同的状态进行赋值即可，此外还提供了根据state状态获取当前url的方法：用一个dic来保存url和state关系。
-
+FLAnimatedImageView(WebCache)
+	FLanimatedImageView的扩展，使用核心方法，在setImageBLock中，通过imageData创建FLanimatedImage，在对animatedImage属性赋值即可。
 	、
 
 
