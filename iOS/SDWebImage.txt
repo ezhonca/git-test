@@ -1,0 +1,174 @@
+SDWebImage
+
+
+Downloader:
+SDWebImageDownloaderOperation:
+	NSOperation子类，用于对request进行下载操作，以及相应的progress和complete回调
+	1、property：request，response，datatask，下载选项，是否解压，预期数据大小，证书
+	2、提供了根据request、session初始化方法、添加progress和complete回调、cancel方法
+
+	实现思路：
+		1、将根据request、session初始化方法、添加progress和complete回调、cancel方法封装成了一个protocal，在类中实现，之后其他的operation可遵循这个protocal自由扩展。
+		2、利用NSOperation将下载步骤封装到start方法中，之后由NSQueue统一调度管理。
+		3、本身实现了NSSession的代理方法，并在相关下载代理中调用处理progress和complete回调，将下载结果传出去。
+		4、用一个array存储回调，将progress和complete回调封装到一个dic中，由addHandle方法添加到这个array中，并返回dic。
+		5、在核心方法start中，首先判断isCancel，是的话直接进行善后工作。之后检查是否允许后台下载，允许的话创建backgroundTaskId。之后判断nsurlsession，如果初始化由传入，则用传入的，没有的话新建一个自用。之后从urlcache中获取cacheresponse data用于后续检验。之后创建datatask，如果创建成功则启动task并发送相应通知，如果失败则调用complete回调发送相应通知。最后，对backgroundTaskId检查关闭。
+		6、在didReceiveResponse的delegate回调中，对预期数据大小，response赋值，并对状态码进行检查，合格的话allow，不合格的话不允许下一步。
+		7、在didReceiveData的delegate回调中，对imageData进行拼接。如果允许递进下载的话，有递进下载器对data进行解码，返回image传入complete回调中。最后调用相应的progress回调。
+		8、在willCacheResponse的delegate回调中，通过下载选项判断是否需要缓存，如果不需要则把response设为nil传入回调中即可。
+		9、在didCompleteWithError的delegate回调中，首先发送相应通知，之后查看是否有error，如果有error则complete传入error，如果没error但imageData为nil，也在complete回调中传入error，如果正常下载成功，则由解码器将imageData解码成image，并相应进行解压等操作，最后调用complete回调。
+		10、在didReceiveChallenge的delegate回调中，如果挑战认证方式为服务器信任模式，且允许无效证书则直接default处理，如果不允许则使用服务器证书认证处理。如果不是服务器信任模式，且有本地证书则使用本地证书认证，否则取消挑战。
+SDWebImageDownloader：
+	图片下载器单例，主要包含了下载配置和下载控制部分，是对SDWebImageDownloaderOperation，用于管理下载操作
+	1、property：是否解压图片、最大并发下载数、当前下载数、下载超市时间、session配置、执行顺序（FIFO/LIFO）、账号密码、证书、头部构造block
+	2、提供了单例和根据sessionConf的初始化方法
+	3、提供了头部的存取方法
+	4、提供了operationClass的设置方法
+	5、提供了根据url、下载选项、progress/completedHandler回调下载图片的方法（返回token，核心方法）
+	6、提供了根据token取消下载的方法
+	7、提供了挂起方法、取消所有下载方法
+	8、提供了创建newSession和invalid session的方法
+
+	实现思路：
+	1、添加了一个token类用于对下载任务的取消，token内包含url、operation、token（id类型，是一个dic，包含了progress和completed回调）属性，取消时，通过调用operation的cancel：方法，将token传入，用于删除相应的回调。
+	2、在+initialize方法中，为activityIndicator注册了下载开始结束通知。
+	3、在初始化方法中，主要处理了property的初始化：重要的是session的初始化和http header（userAgent、accept）的初始化
+	4、提供了一个根据url和下载选项构造一个SDWebImageDownloaderOperation的方法，首先根据url构造request（包括超时时间，头部，cookies等），之后根据request，session，options构造operation，再设置operation的优先级，证书，执行顺序。
+	5、提供了根据token取消operation的方法：根据token中的url，从dic中取出operation，在根据token中的tokenid调用operation的cancel：方法。如果需要取消任务则从dic中删除。
+	6、核心方法：根据url、下载选项、progress/completedHandler回调下载图片，首先检查url，为空的话直接调用completion回调，之后根据url从dic查找operation，如果为空的话，则新建operation，添加对应的dic，将operation添加到queue中启动。并且根据operation、url、progress/complete回调构造token并返回
+	7、提供了挂起和全部取消操作：直接调用nsoperationqueue的suspend和cancelAll方法
+	8、实现了session的相应delegate：根据task找到对应的operation，并调用operation相应的delegate实现。
+
+Cache:
+SDImageCacheConfig:
+	图片缓存配置：是否解压、是否关闭icloud、是否缓存到内存、是否弱缓存、硬盘读写option、最大缓存时间、缓存大小、超时类型
+SDImageCache:
+	图片缓存类，提供图片的存储、删除、查询功能
+	1、property：图片缓存配置、最大内存cost、最大缓存数量
+	2、提供了图片存储、删除、查询方法
+
+	实现思路：
+		1、内部新增了SDMemoryCache，继承NSCache用于图片的缓存，此外SDMemoryCache拥有缓存配置和一个maptable用于弱缓存。内部重写了nscache的添加删除方法，并根据缓存配置的是否弱缓存选项将图片添加到maptable中
+		2、在init中添加appterminal和进入后台的通知，用于清除缓存
+		3、在清除缓存方法中：通过NSDirectoryEnumerator遍历缓存路径下的所有文件和文件夹，如果超过了缓存时间，则把文件添加到一个待删数组中，之后将待删数组的文件remove，最后再计算是否超过最大缓存，如果超过则按照超时类型进行排序进行删除直到最大缓存的一半
+		4、缓存路径管理方法：可自定义添加缓存路径，通过url获取缓存路径和文件名等
+		5、在存储图片方法中：先将图片通过SDMemoryCache存储到内存中，在根据是否缓存到disk将image解压为data之后write到fileurl中
+		6、在查找图片方法中：提供了通过url查找图片是否存在，如果根据url不存在，则会去掉后缀再查找。在获取图片方法中，先查找SDMemoryCache是否有image，有的话直接返回，没有的话查找disk的所有path，先获取file的data，再通过data解码成image，此外还会根据是否解压等进行缩放和解压处理。算法通过一个operation封装，可以在算法开始前，取消查找过程。
+		7、在删除图片方法中，根据需要分别从内存和disk中删除图片
+		8、缓存信息相关方法：通过读取path下的所有文件信息计算缓存个数以及缓存大小。
+
+Decoder:
+SDWebImageCompat.h:
+	兼容性头文件，区分了ios、mac、watch、tv上的不同，提供了一个方法根据key中的2x/3x信息缩放图片：UIImage *SDScaledImageForKey(NSString *key, UIImage *image)：如果不是动图，则直接根据key中是否有2x/3x字段进行缩放，如果是动图则直接创建animatedImage并设置loopCount和format。
+SDWebImageFrame：
+	图片帧封装类，包含了一个图片和持续时间，用于构造动图
+SDWebImageCoderHelper：
+	一个coder的帮助类，用于animatedImage和SDWebImageFrame之间的转换。
+	1、animatedImage转换成frames：从animatedImage中取出images，遍历images，将duration按照images数量均分，如果images有重复的话，则对应duration加倍，最后将image和duration转换成frames
+	2、frames转animatedImage：将frames中的image取出并把duration累加，最后构造animatedImage
+	3、exif image和UIImage的Orientation之间的转换
+SDAnimatedImageRep：
+	NSBitmapImageRep子类，mac专用，用于解决kCGImagePropertyGIFUnclampedDelayTime替换kCGImagePropertyGIFDelayTime的问题
+SDWebImageCoder：
+	imageCoder的协议，定义了是否可以解码编码解压图片，子协议SDWebImageProgressiveCoder：定义了递增解码数据。实现了两个方法：CGColorSpaceRef _Nonnull SDCGColorSpaceGetDeviceRGB(void);和BOOL SDCGImageRefContainsAlpha(_Nullable CGImageRef imageRef);获取色彩空间和判断是否包含透明层。
+SDWebImageGIFCoder：
+	GIF图片处理类，实现SDWebImageCoder协议
+	1、编码：通过CGImageDestinationCreateWithData将imageData与一个CGImageDestinationRef绑定，往CGImageDestinationRef添加image的cgImage，添加duration并处理loopcount。
+	2、解码：通过CGImageSourceCreateWithData将data转换成CGImageSourceRef。CGImageSourceGetCount获取图片数量，只有一张的话则为普通图片，直接initWithData返回UIImage。当图片为多图时，CGImageSourceCreateImageAtIndex遍历sourceRef获取imageRef，在通过kCGImagePropertyGIFUnclampedDelayTime获取imageRef的duration。最后将imageRef转化成UIImage后和duration封装成frames，通过SDWebImageCoderHelper转换为animatedImage。
+SDWebImageImageIOCoder：
+	普通Image的处理类，实现了SDWebImageProgressiveCoder协议，可递增处理data
+	1、编码：通过CGImageDestinationCreateWithData将imageData与一个CGImageDestinationRef绑定，往CGImageDestinationRef添加image的cgImage
+	2、解码：通过data转换成uiimage，再通过data获取image的type，设置到image中
+	   递增解码：CGImageSourceUpdateData将data转化为imageSourceRef，CGImageSourceCreateImageAtIndex获取部分imageRef，将imageRef转化为UIImage。
+	3、解压：如果不缩放，则获取一个imageRef之后，将imageref画到画布上。CGBitmapContextCreate、CGContextDrawImage、CGBitmapContextCreateImage。
+			如果需要缩放，则根据设定的最大像素计算出画布的长宽，定义一个大小固定的方块，然后把原图按照方块的大小进行分割，最后把每个方块中的数据画到目标画布上，最后通过画布获取image
+SDWebImageCodersManager：
+	coder的统一管理类，提供添加删除coder方法，自身实现SDWebImageCoder协议，协议实现方法内部都是通过遍历manager中的coder来进行解码编码操作（是一个不错的设计模式）
+
+Utils：
+SDWebImageManager：
+	核心类：可以看作是cache和downloader的结合
+	1、property：SDWebImageManagerDelegate、imageCache、imageDownloader、cacheKeyFilter、cacheSerializer、
+	2、提供单例和根据cache和downloader的初始化方法
+	3、提供核心方法：根据url、options、progress/completedHander下载image，返回一个operation
+	4、提供将image存储到cache的方法
+	5、提供cancleAll、isRunning、checkImageExist、diskImageExist、cacheKeyForUrl方法
+
+	实现思路：
+	1、cacheKeyForURL：如果cacheKeyFilter存在则使用，不存在则返回url的absoluteString
+	2、cachedImageExistsForURL：首先通过imageCache的imageFromMemoryCacheForKey，找到的话返回，找不到的话通过diskImageExistsWithKey查找disk。
+	3、diskImageExistsForURL：通过diskImageExistsWithKey查找disk。
+	4、核心方法：- (id <SDWebImageOperation>)loadImageWithURL:options:progress:completed:首先检查url合法性，并在url黑名单中查找，如果找到切不retry则返回。使用imageCache的查找方法，先查找内存再disk，找到则调用complete回调，找不到且不允许下载则回调返回nil，允许下载的话则进入下载阶段：如果图片已下载且需要refreshCache的话，会先触发一次complete回调再下载，使用downloader对url进行下载，如果下载失败，则会根据delegate决定是否加入黑名单，成功的话首先移除黑名单，接着根据需要对图片进行缩放，根据delegate决定是否需要transform图片，接着将图片保存到cache中，最后调用complete回调，并且将operation从数组中移除。
+	5、saveImageToCache：调用imageCache将image存储到cache中。
+	6、cancelAll：将loadImage时查询cache的cacheOperation、downloader下载时的token封装成一个operation，加入到一个数组中。取消所有任务时，遍历数组，先取消cacheOperation，接着通过manager找到downloader，在通过downloader和token取消下载任务。
+	7、isRunning：看operation数组中是否为空。
+SDWebImagePrefetcher：
+	批量预取：通过SDWebImageManager将多个url下载下来存储。
+	1、property：image manager、最大并发下载数量、下载选项、delegate
+	2、提供单例和根据manager的初始化方法
+	3、提供带progress/complete回调和不带回调的预取方法
+	4、提供取消预取方法。
+
+	实现思路：
+	1、不带回调的下载方法调用的带回调的下载方法，根据最大并发下载数量启动manager下载，并在下载方法中递归调用以达到全部完成的目的。
+	2、取消预取方法中，直接调用manager的cancleAll方法
+SDWebImageTransition：
+	图片转场类：提供各种图片转场的option，duration为0.5
+
+
+
+
+
+Catagory:
+NSData (ImageContentType):
+	NSData分类：可用于从NSData中获取图片的类型（GIF、PNG等），可用于图片类型CFStringRef和自定义SDImageFormat之间的转换
+	1、实现了从NSData中获取图片的类型（GIF、PNG等）：根据NSData数据的开头几个字节判断生命类型，多数从第一个字节可以判断，少数需要多个字节判断
+	2、实现了图片类型CFStringRef和自定义SDImageFormat之间的转换：CFStringRef之间的对比用CFStringCompare(uttype, kSDUTTypeHEIF, 0) == kCFCompareEqualTo，NSInteger对比直接用=号
+UIImage (GIF)：
+	从NSData从判断是否是GIF图片并获取
+	1、实现了从NSData从判断是否是GIF图片并获取，通过SDWebImageGIFCoder从data中获取图片，不是nil的话代表是gif图片
+UIImage (MultiFormat)：
+	为UIView添加了loopCount和format，提供了根据data获取UIimage，以及将UIImage根据format转换成nsdata
+UIImage (ForceDecode)：
+	通过SDWebImageCodersManager对image进行解压，强行解压
+UIView (WebCacheOperation)：
+	通过关联对象创建一个内部的NSmapTable，可向table中添加/移除/取消operation
+
+UIView:
+NSImage (WebCache)：
+	mac专用，用于获取cgimage和判断是不是gif图片
+UIView (WebCache)
+	UIView的扩展：
+	1、为UIview添加了activity indicator，可根据需要添加/移除indicator并设置style
+	2、为UIView添加了一个SDWebImageTransition
+	3、为UIVIew添加了url、progress、以及url图片、添加了取消当前图片下载功能
+
+	实现思路：
+	1、核心方法中：- (void)sd_internalSetImageWithURL:placeholderImage:options:operationKey:setImageBlock:progress:completed:context:，首先先根据setImageBlock给uiview设置图片，如果是imageview或者button的话则正常设置图片，之后根据是否显示indicator进行显示。之后调用manager的核心方法进行下载，progressHandler与progress绑定，在completeHandle中结束indicator，如果自动设置图片，则获取transition后，对图片进行正常设置，进行动画等
+UIImageView (WebCache)
+	UIImageView的扩展，
+	1、核心方法中调用了UIView的sd_internalSetImageWithURL:placeholderImage:options:operationKey:setImageBlock:progress:completed:context：进行设置，此外还可以在cache查找图片用于作为holdplacer
+	2、sd_setAnimationImagesWithURLs提供了根据一组url构造动图的方法，使用manager分别对url进行下载，把下载的图片放入一个数组中传给UIImageView的images
+	3、使用一个弱引用数组NSPointerArray来存放operation
+UIImageView (HighlightedWebCache)
+	UIImageView的扩展，专门用于设置highlight图片，在setImageBlock:中设置对highlight图片进行赋值即可
+UIButton (WebCache)
+	UIbutton的扩展，使用UIView的webCache核心方法，在setImageBlock:中设置对不同的图片以及不同的状态进行赋值即可，此外还提供了根据state状态获取当前url的方法：用一个dic来保存url和state关系。
+
+	、
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

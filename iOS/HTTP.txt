@@ -1,0 +1,58 @@
+HTTP
+
+一、web基础
+	1、URI(URL+URN):
+		URL：统一资源定位符（方案：//用户：密码@主机：端口/路径，参数？查询字符串#片段、相对URL/自动扩展URL、URL百分比编码）
+		URN：统一资源名（通过名称直接找到资源，通过中间层对URL进行跟踪记录）
+	2、HTTP报文（请求+响应）：起始行（get /index HTTP/1.0：HTTP/1.0 200 ok）+头部（accept-/if-modified-since/cookies/Authorization：set-cookies/www-authenticate/Allow/Content-/ETag/Expires/last-modified）+实体
+	3、TCP连接
+		安全可靠三次握手连接
+		基于socket
+		TCP的性能考虑（HTTP事务时延/握手时延/慢启动）
+		持久化：keep-alive/持久连接（HTTP1.1默认）
+		管道化连接：对keep-alive的优化，把多条请求放在队列中发送不用等待响应到达
+		TCP的关闭
+二、HTTP基础架构
+	1、web服务器：
+		处理连接：建立或取消
+		接受请求
+		处理请求
+		访问资源
+		构建响应
+		发送响应
+		记录日志
+	2、代理服务器：web中间实体，用于访问控制过滤等（via字段显示经过的代理，trace）
+	3、缓存服务器：解决网络堵塞，缓解服务器压力，降低距离延时，减少冗余传输（与服务器进行更新）
+	4、集成点：
+		网关：用于不同协议的转换
+		隧道：在http中嵌入非http协议流量（SSL隧道）
+		中继：盲转发
+	5、web机器人（爬虫）：有特殊的头部表示自己
+	6、HTTP—NG：性能增强
+三、识别、认证、安全
+	1、识别与cookies：服务器发送set-cookies，客户端在请求中带上cookies头部表示自己
+	2、basic认证：服务器头部带有www-authorization进行挑战，客户端把用户名密码通过basic64编码放入authorization头部。
+	3、摘要认证：对密码以及随机数进行MD5获取摘要发送给服务器验证
+	4、HTTPS：HTTP+SSL：先由ssl握手进行非对称加密，再由挑选出的加密算法进行对称加密
+四、实体编码和国际化
+	1、实体和编码（内容编码、content-、传输编码TE、分块编码（就不需要content-length了）、差异编码IM）
+	2、国际化：Accept-Charset/Accept-language，百分比编码
+	3、内容协商与转码：选择内容语言，格式转换
+五、内容发布与分发
+	1、主机托管
+	2、发布系统
+	3、重定向、负载均衡
+	4、日志记录
+
+HTTP：优化技术：主要依靠负载均衡设备将服务器的部分功能迁到负载均衡设备中：TCP复用，TCP缓冲，SSL加速， HTTP压缩等
+面试题：
+	https://www.cnblogs.com/Java3y/p/8444033.html
+
+
+
+
+
+
+
+
+

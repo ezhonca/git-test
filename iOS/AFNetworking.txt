@@ -1,0 +1,287 @@
+AFNetworking：
+是一个OC语言实现的iOS网络相关处理的第三方开源框架，基于NSURlsession的封装，实现了对URL loading system的补充。
+
+urlsession本身来说主要有这几个不方便的地方，一个是对手机当前网络的判断，另外一个是对request的构造，特别是对uploadtask的request需要手动去构建boundary，head，body等数据，很繁琐。AFnetworking很好的解决了以上问题：其中requestSerializer用于对请求的封装，可以根据method自动对查询字段进行拼接/构造request body等等。responseSerializer可以根据需要将响应进行处理成JSON/Plist等格式。AFnetworkingReachablityManage用于网络可达性的监控（基于SCnetworkreachablityRef实现）。
+
+此外，核心类AFURLsessionmanager对NSurlSeesion进行类封装，用于构建各种task，还实现了session的delegate的处理（比如downloadtask下载完成后的文件转存，实现了HTTPS安全策略用于对challege进行处理等等），另外还实现了task的progress回调、通过swizzling替换了task的resume/suspend/cancel方法，在方法被调用时会发送通知，实现了对task的监控、此外还由于实现session的delegate，因此相应增加了每个代理方法的block，可以满足使用者的自定义操作。使用者可以使用其子类AFHTTPsessionmanager非常方便的进行网络请求，省去了非常多的工作量。
+
+另外还实现了UIKit的一些扩展。AFNetworkingActicityIndicatorManager通过对活动的task数量（通过监控task生命周期实现）对网络指示器进行操作。UIActivityIndicatorVIew/UIRefreshControl/UIProgressView对task进行绑定，可根据task的变化进行相应的动画，另外还实现了一个图片缓存器和下载器，用于缓存图片以及避免重复的下载请求，UIImageView和UIButton这两个扩展通过图片缓存器，可以达到很方便的下载网络图片的目的，并且避免重复下载提高效率。
+
+总体来说，AFNetworking是一个非常值得细细品味的开源框架，除了功能实现、框架的细节设计也值得我们学习，比如通过swizzling对task的方法进行替换用于监控task的生命周期，比如UIRefreshControl对task进行观察对时候，并不是直接注册了task的通知，而是内部实现了一个oberser，通过observer对task进行观察，把业务逻辑划分的更加合理。
+
+
+
+
+AFURLRequestSerialization协议，可用于对NSURLRequest的封装：实现的AFHTTPRequestSerializer可根据method自动对用于request查询字段的拼接、httpbody的构造，在构造upload request特别有效。
+AFURLResponseSerialization协议：实现类用于处理response并返回responseObject，可以设置acceptcode和acceptcontenttype对response进行验证
+AFNetworkReachabilityManager：对SCNetworkingReachabilityRef的封装，用于获取网络可达性。
+AFSecurityPolicy：安全策略类，分别实现了基于完全信任、基于证书和基于公钥的安全验证策略。用于验证session接收到挑战信息后的安全验证处理(验证证书是否正确)，用在session的delegate中
+AFURLSessionManager:对NSURLSession的封装，用于构建Task，新增了task对应的progress处理，实现了session的delegate处理，每个task可带有自己的结束回调，新增监听task的各种状态，新增安全策略，可达管理，response序列化功能  
+AFHTTPSessionManager：AFURLSessionManager的子类，针对HTTP实现，新增了通过requestSerializer自动封装URLRequest（请求序列器通过传进来的method判断如何封装），新增了对各种方法的task获取（multipartFormData的serializer的方法用的不一样）
+AFAutoPurgingImageCache：一个带有自动清理功能的图片缓存器，可以将app下载的图片缓存的内存中，并在缓存到达一定界限时自动清除最旧的图片。
+AFImageDownloader：实现了一个图片下载器，可根据request进行图片下载，封装了图片缓存器，可避免同个request重复下载或者已下载的图片再次下载。
+AFNetworkingActicityIndicatorManager：网络活动指示器，AFNetworking的task的生命周期都发送了通知，可注册观察这些通知来控制指示器的开关，当有任务启动时激活，任务结束时检查是否还有任务进行，没有的话结束，增加了两个计时器来控制延时。
+UIActivityIndicatorVIew+AFNetworking:分类，将UIActicityIndicatorView与Task绑定，监听task的生命周期
+UIRefreshControl+AFNetworking：分类，实现与UIActivityIndicatorVIew分类完全相同
+UIImageView+AFNetworking：通过一个共享的图片下载器来对下载图片进行控制，可以进行图片缓存且避免重复下载
+UIButton+AFNetworking：实现与UIImageView相同，只不过button有两个image，一个是bgImage，一个是正常image，分开实现了。
+UIProgressView+AFnetworking：实现了UIProgressView与task的绑定，可通过监听task来setProgress
+
+
+
+
+
+
+
+
+AFURLRequestSerialization:一个协议，可用于对NSURLRequest的封装：实现的AFHTTPRequestSerializer可用于request查询字段的拼接、httpbody的构造
+	AFHTTPRequestSerializer
+		1、property：字符串编码（UTF8）、是否允许蜂窝网络、缓存策略、是否允许http管道、网络服务类型、超时时间、http请求头部。以上均为NSURLRequest的property，用于设置初始request。
+		2、实现了设置获取请求头部方法以及认证头部到设置方法
+		3、实现了用于封装get/head/post一般数据请求的核心方法- (NSMutableURLRequest *)requestWithMethod:(NSString *)method
+                                 URLString:(NSString *)URLString
+                                parameters:(nullable id)parameters
+                                     error:(NSError * _Nullable __autoreleasing *)error;
+        4、实现了用于post multipart/formdata的请求（就是封装uploadtask的请求）
+        5、实现了把一个请求的httpbodystream写入文件的方法
+
+        实现思路：
+        1、实现了字符串百分比编码方法（1、获取不需重新编码的字符串set。2、将字符串以50个字符为分割，emoji有特殊处理（rangeOfComposedCharacterSequencesForRange防止被分割）。3、stringByAddingPercentEncodingWithAllowedCharacters获取处理好的字符串）
+        2、添加了内部类AFQueryPair用于封装查询=号左右两边，该类实现了字符串拼接方法。
+        3、实现了将dic封装为query的方法（1、先根据dic获取出所有的AFQueryPair（这步运用了递归方法处理dic：如果value是dic则拼接为key[key1]=value1&key[key2]=value2,如果value
+        是array，拼接成key[]=obj1&key[]=obj2,如果value是set，拼接成key=obj1&key=obj2）。2、使用AFQueryPair的拼接方法，在用&连起来所有的pair就行了）
+        4、为了封装multipart的post请求，添加了内部类AFHTTPBodyPart（包含边界、body头部、body等内容，用于对body对封装）、AFMultipartBodyStream（用于设置request的httpstream，可以看作是把AFHTTPBodyPart写入请求中的管道，继承了NSInputStream，实现了read方法，在read中把所有的bodypartread进buffer中），以及AFStreamingMultipartFormData（AFMultipartBodyStream的封装类，实现了AFMultipartFormData协议，可以往内部引用的AFMultipartBodyStream添加bodypart并组装成data，并将stream设置为请求的httpBodyStream）。
+        5、multipartFormData的详细实现过程：1、AFStreamingMultipartFormData通过append方法，将参数重的name、filename、MIMEType封装成body头部，dody内容可分为fileURL、data、inputStream等，通过AFHTTPBodyPart类把上述信息封装起来，并传入内部AFMultipartBodyStream的body数组中。2、AFStreamingMultipartFormData通过requestByFinalizingMultipartFormData获取出request，其中request的httpBodyStream设置为内部的AFMultipartBodyStream，当task发送请求时，request会调用stream中的read方法读取数据。3、AFMultipartBodyStream的read方法中，遍历了bodypart数组，将每个bodypart的数据通过bodypart内部的inputstream读取到buffer中。4、bodypart类在封装时，将body内容封装到了一个inputstream中，bodypart在拼接data时，按body格式先拼接boundary、header、通过inputstream读取body，最后是结束boundary。
+        6、认证头部设置方法中，账号密码被拼接成user：pass格式，通过base64encode之后设置到Authorization头部区域中。
+        7、核心方法- (NSMutableURLRequest *)requestWithMethod:(NSString *)method
+                                 URLString:(NSString *)URLString
+                                parameters:(nullable id)parameters
+                                     error:(NSError * _Nullable __autoreleasing *)error;中，首先通过URLString生成初始化request，通过KVO将自己property设置到request中，之后调用协议方法，协议方法对request进行封装，首先将header数组中的header（包括接受语言，user-agent等等）设置到request中，之后对method进行判断，如果method是get/head/delete则直接把parameters的dic转化为query之后拼接到url中，如果是post，则把转化的query设置为request的httpbody
+        8、multipart/formdata的请求生成方法中，首先通过核心方法获取初始化request，接着把parameter的dic转化为pair，并且通过formData append到stream中，之后如果有自定义的block，则执行block，最后通过formData的requestByFinalizingMultipartFormData获取出request。
+        9、把一个请求的httpbodystream写入文件的方法中，通过一对inoutputstream将request的httpbodyStream写入文件中，并将httpbodyStream设置为nil，最后返回request。
+    AFJSONRequestSerializer：用于封装json格式的post请求的body
+
+    	实现思路：
+    	1、如果是get/head/delete方法，则调用AFHTTPRequestSerializer进行拼接
+    	2、如果是post，则将初始request进行相应正常的头部设置（语言、content-type等等），之后直接把parameters的dic通过NSJSONSerialization转换成data后设置到request的httpbody中。
+    AFPropertyListRequestSerializer：用于封装plist格式的post请求的body
+    	实现思路：与AFJSONRequestSerializer相同，content-type变化以及通过NSpropertyListSerialization转换data
+
+ AFURLResponseSerialization协议：核心方法- (nullable id)responseObjectForResponse:(nullable NSURLResponse *)response
+                           data:(nullable NSData *)data
+                          error:(NSError * _Nullable __autoreleasing *)error NS_SWIFT_NOTHROW;用于处理response并返回responseObject
+    AFHTTPResponseSerializer：不对responseObject做处理，主要可通过acceptCode和contentType对response进行验证。
+    AFJSONResponseSerializer：通过json序列化responseObject，并对其中value为nil的进行删除。
+    AFPropertyResponseSerializer：通过property序列化responseObject。
+    AFXMLParserResponseSerializer：把data封装成一个xmlParse返回
+    AFXMLDocumentResponseSerializer：把data封装成一个xmlDocument返回
+    AFImageDocumentResponseSerializer：把data封装成一个image返回，会对image进行解压操作，提高性能
+	AFCompoundResponseSerializer：一个组合序列器，组合了多个响应序列器，只要其中一个序列器能解析响应不返回error就使用此序列器解析
+
+
+AFNetworkReachabilityManager：对SCNetworkingReachabilityRef的封装，用于获取网络可达性。
+	1、property
+		网络可达状态（未知，不可达，WiFi可达，WAN可达）、是否可达、是否WAN可达、是否WiFi可达
+	2、通过start（stop）Monitoring来开关监听
+	3、可设置可达状态改变回调，本地化网络可达string
+
+	实现思路：
+	1、在工厂方法中构造SCNetworkingReachabilityRef，可通过domain也可通过address，将其保存为不可见属性
+	2、在startMonitoring方法中，首先以可达状态改变回调block，block的retain和release方法构造context，接着设置SCNetworkingReachabilityRef的回调和context，然后将SCNetworkingReachabilityRef schedule到runloop中，之后手动触发一次回调，之后当状态改变时会出发回调block。
+	3、在stopMonitoring方法中移除SCNetworkingReachabilityRef的schedule就行
+	4、将状态的KVO映射到是否可达属性中。
+
+AFSecurityPolicy：安全策略类，用于验证session接收到挑战信息后的安全验证处理(验证证书是否正确)- (void)URLSession:(NSURLSession *)session
+didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
+ completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential *credential))completionHandler
+ 	1、property：SSLPinningMode（none：不验证，publicKey：验证公钥，certificate：验证证书）验证模式、本地证书、是否允许无效证书、是否使domainname生效
+ 	2、实现了获取本地证书的方法
+ 	3、带有验证模型和本地证书为参数的工厂方法
+ 	4、实现了验证serverTrust方法
+
+ 	实现思路：
+ 	1、在验证方法中，首先检查本地证书数量是否为0或者mode是否为none，是的话报错，验证条件不符合，返回NO。接着通过SecPolicyCreate构造policy数组，set到serverTrust中，如果mode为none，且允许无效证书或者SecTrustEvaluate验证serverTrust通过，则返回YES，如果两个都是否，返回no。如果模式是验证证书，则将本地证书set到serverTrust中进行验证，不通过的话返回NO，接着从SecTrustRef中获取证书链，如果本地证书包含证书链中的某个证书，则返回YES，否则返回NO。如果模式是验证公钥，则从serverTRsut中获取公钥数组，并且与本地绑定公钥（在获取本地证书时，从本地证书中获取了本地公钥）对比，有一个相同的返回YES。其他情况下返回no
+ 		
+
+
+
+AFURLSessionManager:对NSURLSession的封装，新增了task对应的progress处理，实现了session的delegate处理，每个task可带有自己的结束回调，新增监听task的各种状态，新增安全策略，可达管理，response序列化功能  
+	1、property
+		session、操作队列、securityPolicy、reachabilityManager、各种task、completionQ和CompletionGroup
+	2、通过NSURLRequest获取各种task：datatask、downloadTask、uploadTask
+	3、获取task的NSProgress
+	4、使session失效
+	5、设置各种代理的block
+
+	实现思路：
+	1、新建了内部类AFURLSessionManagerTaskDelegate（property：弱引用manager、数据、上下传进度、下载路径、progress回调），作用是将此delegater与一个task绑定，让progress的resume、cancel、suspend回调与task绑定，并让delegate用KVO监听progress的fractionCompleted属性，在KVO回调中可根据object是哪个progress来调用progress的block。delegate实现了各种NSURLSessionDelegate，在AFURLSessionManager的delegate回调中，可通过task找到淇对应的delegater，调用delegater中的
+	对应delegate方法实现。总结：AFURLSessionManagerTaskDelegate实现了对progress和NSURLSession的delegate的处理。
+	- (void)URLSession:(__unused NSURLSession *)session
+            	  task:(NSURLSessionTask *)task
+	didCompleteWithError:(NSError *)error 主要处理了任务结束时的回调，当error存在时，在一个group中异步调用completion回调，并在主线程中发送通知（通知的userinfo中会封装进数据，错误码、url等信息），如果error不存在，处理方法同上，只是会通过弱引用的manager的response序列器对数据进行处理（默认处理json），在发送的通知中封装进不同的userinfo。
+	- (void)URLSession:(__unused NSURLSession *)session
+          dataTask:(__unused NSURLSessionDataTask *)dataTask
+    didReceiveData:(NSData *)data中，处理了datatask接受数据的回调，将接受到的数据append到property的data中，并且更新downloadProgress的总数和完成数量。
+
+    - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task
+    didSendBodyData:(int64_t)bytesSent
+    totalBytesSent:(int64_t)totalBytesSent
+	totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend处理了uploadTask的发送数据回调，直接更新uploadprogress的总数和已完成数。
+
+	- (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)downloadTask
+    didWriteData:(int64_t)bytesWritten
+	totalBytesWritten:(int64_t)totalBytesWritten
+	totalBytesExpectedToWrite:(int64_t)totalBytesExpectedToWrite处理了downloadTask的接受数据回调，直接更新downloadprogress的总数和已完成数。
+
+	- (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)downloadTask
+ 	didResumeAtOffset:(int64_t)fileOffset
+	expectedTotalBytes:(int64_t)expectedTotalBytes处理了downloadTask恢复时的数据回调，直接更新downloadprogress的总数和已完成数。
+
+	- (void)URLSession:(NSURLSession *)session
+      downloadTask:(NSURLSessionDownloadTask *)downloadTask
+	didFinishDownloadingToURL:(NSURL *)location处理了downloadtask完成时，临时文件存放的问题，将location的临时文件存放到通过block传进来url中，并发送通知。
+
+	2.监听了task的resume、cancel、suspend方法，通过swizzling的手段，在原有的方法中加入通知发送操作，达到监听方法的目的。
+	需要注意的是，并非直接替换NSURLSessionDataTask的方法就行了，因为各种task很多，实现resume、cancel、suspend方法的类不一定是哪一个父类，并且不同的ios系统版本实现的类还不一样，因此需要通过遍历task的所有父类，找到确定实现了resume、cancel、suspend方法的类，再进行替换。但是并不是所有的task都需要AF监听，因此AF在task获取时，会标记一个task的description，在接收通知时对des进行验证，有的话表明需要监听（分为内外两个通知，替换后的方法内通知给AF，AF接收到验证des通过后，发送外通知给观察者）。
+
+	3、在指定初始方法中实例化各种property，并在各种获取task的方法中对task进行delegate绑定（通过dic对应），session的delegate是自己，在session的回调中，通过task找到对应的delegater调用处理方法，并调用对应的每个block
+
+AFHTTPSessionManager：AFURLSessionManager的子类，针对HTTP实现，新增了自动封装URLRequest（请求序列器通过传进来的method判断如何封装），新增了对各种方法的task获取
+	1、property
+		basedURL，请求/回应序列器、安全策略、
+	2、通过URLString获取各种GET/POST/HEAD等方法的dataTask，可带有参数、progress和成功失败回调
+
+	实现思路：
+	1、在初始化方法中设置了请求/回应序列器，默认AFHTTPRequstSerializer和AFJSONResponseSerializer。
+	2、对安全策略的进行过滤，只有https的url可以设置（使用了@dynamic）
+	3、所有获取dataTask的方法都调用核心方法：（并且会自动resume task）
+	- (NSURLSessionDataTask *)dataTaskWithHTTPMethod:(NSString *)method
+                                       URLString:(NSString *)URLString
+                                      parameters:(id)parameters
+                                  uploadProgress:(nullable void (^)(NSProgress *uploadProgress)) uploadProgress
+                                downloadProgress:(nullable void (^)(NSProgress *downloadProgress)) downloadProgress
+                                         success:(void (^)(NSURLSessionDataTask *, id))success
+                                         failure:(void (^)(NSURLSessionDataTask *, NSError *))failure
+    	方法中，请求序列器通过传进来的method自动封装一个NSURLRequest（get方法带参数时拼装，post方法带参数如何拼装等等）。之后调用父类方法
+    	- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request
+                               uploadProgress:(nullable void (^)(NSProgress *uploadProgress)) uploadProgressBlock
+                             downloadProgress:(nullable void (^)(NSProgress *downloadProgress)) downloadProgressBlock
+                            completionHandler:(nullable void (^)(NSURLResponse *response, id _Nullable responseObject,  NSError * _Nullable error))completionHandler 
+        获取dataTask，在completionHandler中如果没有error，则执行success回调，有的话failure回调。父类的该方法将progress和结束回调封装进task的delegate中，将task与delegate绑定，在session收到delegate回调时，根据task找到对应的delegater执行回调。
+    4、当post方法为构造body时，则为uploadTask，还是有请求序列器根据构造block封装一个NSURLRequest，再调用父类的- (NSURLSessionUploadTask *)uploadTaskWithStreamedRequest:(NSURLRequest *)request
+                                                 progress:(void (^)(NSProgress *uploadProgress)) uploadProgressBlock
+                                        completionHandler:(void (^)(NSURLResponse *response, id responseObject, NSError *error))completionHandler
+                                        获取uploadTask
+
+AFAutoPurgingImageCache：一个带有自动清理功能的图片缓存器，可以将app下载的图片缓存的内存中，并在缓存到达一定界限时自动清除最旧的图片
+	1、property
+		缓存容量、超过缓存后清理的目标值、当前缓存量
+	2、实现了通过identifier添加/移除图片方法
+	3、实现了针对request的添加/移除图片方法
+
+	实现思路
+	1、内部实现了一个AFCachedImage类（封装UIImage，不是继承，包含对应的idengtifier、图片内存大小、最后使用时间（用于缓存器判断最旧的图片加以清除）属性）。实例在init的同时计算出内存大小并绑定identifier，获取图片使用accessImage方法，同时修改最后使用时间。
+	2、通过一个dic将identifier与image对应，用于查找image。
+	3、在init时，设置缓存大小，生成了一个并发队列用于处理添加/删除/获取image，并且注册了app内存警告通知，收到通知时直接remove所有图片。
+	4、在添加图片时，通过异步barrier确保队列中的其他任务先完成。在dic中添加对应的键值并且修改当前缓存量，当当前缓存量超过阈值时，删除最旧的图片使缓存降到目标值为止。
+	5、在删除图片时，通过异步barrier确保队列中的其他任务先完成，在dic删除对应键值对并修改当前缓存量。
+	6、针对request的添加/移除只是图片的identifier根据request+identifier拼接而已。
+
+AFImageDownloader：实现了一个图片下载器，可根据request进行图片下载，封装了图片缓存器，可避免同个request重复下载或者已下载的图片再次下载。
+	1、property：图片缓存器、sessionManager、下载优先级（控制先进先出还是先进后出）。
+	2、实现了通过request下载图片的方法，在回调block中可直接拿到image。
+	3、实现了通过凭据取消下载的方法。
+
+	实现思路：
+	1、新增了一个图片下载凭据类AFImageDownloadReceipt，该类在下载器生成下载task时，自动生成一个凭据（封装了凭据ID和task），之后可根据凭据取消此下载任务（移除任务或者移除任务的回调）。
+	2、新增了一个下载响应处理类，封装了一个UUID（凭据ID）和成功失败回调，该类通过凭据ID与task绑定，用于调用回调或者取消任务时取消回调。
+	3、新增了一个合并任务类，封装了一个task、URLIdentifier（通过request的urlstring获取，用于通过url找到对应的合并task）、一个凭据id（用于和响应处理类绑定）、响应处理数组，当下载器要新增下载任务时，会通过url寻找是否有合并任务类，没有的话新增task，有的话，只需在合并任务类的响应处理数组中添加响应处理类即可。当下载器要取消下载任务时，只需根据凭据ID移除数组中的响应类即可，数组为空时，即可释放该合并任务。
+	4、内部添加了同步队列（整个下载任务是同步的）、响应队列（处理完成回调）、最大下载数、当前下载数、队列中等待任务列表、合并任务dic。
+	5、在init中，设置了session的configuration的URLCache，内存20M、disk 150M，初始化了图片缓存器。
+	6、- (nullable AFImageDownloadReceipt *)downloadImageForURLRequest:(NSURLRequest *)request
+                                                  withReceiptID:(nonnull NSUUID *)receiptID
+                                                        success:(nullable void (^)(NSURLRequest *request, NSHTTPURLResponse  * _Nullable response, UIImage *responseObject))success
+                                                        failure:(nullable void (^)(NSURLRequest *request, NSHTTPURLResponse * _Nullable response, NSError *error))failure
+    启动下载任务并且返回凭据，可通过凭据获取凭据id，取消对应的下载任务。该方法首先判断request的url是否为空，空的话调用failure回调。通过request获取urlIdentifier，通过urlIdentifier在dic中获取对应的合并task，如果合并task存在，则把成功失败回调以及receiptID封装进一个响应处理类，并添加进合并task的响应数组中，跳出block，如果task存在则返回对应的凭据，否则返回nil。如果合并task不存在，首先根据request的cachePolicy查找图片缓存器中是否有对应的image，有的话直接返回，调用成功block。如果缓存器中没有，则通过sessionManager新建一个dataTask，并且和URLIdentifier，响应处理类、mergedIdentifier封装进mergedTask中，在dic中添加相应键值对。如果当前下载数未超过最大数，直接开始下载，超过的话，进入等待队列。
+    7、当任务的图片下载完成之后，需要在完成回调中返回image，并通过该任务找到对应的回调并调用：首先根据request的urlIdentifier获取对应的mergedTask，并且移除dic中的mergedTask，如果下载时有error发生，则遍历task中的响应处理数组，调用所有failure回调，如果没有err，首先在缓存器中添加request对应的图片，并且遍历响应处理数组，调用所有的success回调，成功后把当前下载数减1，并且检查等待队列是否有任务需要启动。
+    8、可根据凭据取消下载任务：通过凭据中的task获取URLIdentifier，在dic中找到对应的mergedTask，遍历响应数组，查找响应处理类的凭据ID，找到的话，从数组中删除，如果响应数组为0了且下载任务不在进行，则把该mergedTask删除。
+    9、任务满了需要入队时，根据下载优先级添加队列，在出队时，直接出第一个，并进行任务启动。
+
+AFNetworkingActicityIndicatorManager：网络活动指示器，AFNetworking的task的生命周期都发送了通知，可注册观察这些通知来控制指示器的开关，当有任务启动时激活，任务结束时检查是否还有任务进行，没有的话结束，增加了两个计时器来控制延时。
+	1、property
+		是否启用、当前是否可见、激活延迟、结束延迟
+	2、实现了增减活动数量，用于控制是否可见
+	3、实现了指示器回调
+
+	实现思路：通过task的生命周期通知来控制指示器的阶段改变（未激活，开始激活延迟，激活，结束激活），进而控制指示器开关
+	1、在init中，注册对task生命周期的监听，当task resume时，使活动数量加1，当task结束或者suspend时，活动数量减一
+	2、当有task启动的，活动数量增加，调用更新状态方法updateCurrentStateForNetworkActivityChange，该方法首先检查enable，之后根据当前状态决定如何处理，如果当前状态时为激活，则根据活动数量获取是否应该显示，如果是的话，把状态设置为开始激活延迟，延迟时间计时器fire后，检查当前是否应该显示，如果是的话，把状态设置为激活，不是的话状态设置为未激活。状态设置为激活时，把指示器状态设置为可见，有block调用block没有的话 [[UIApplication sharedApplication] setNetworkActivityIndicatorVisible:networkActivityIndicatorVisible];并且取消结束激活计时器。状态设置为未激活时，把指示器状态设置为不可见，取消所有计时器。
+	3、有任务挂起或者完成时，活动数量减一，调用状态更新方法，如果当前状态时激活，则检查是否应该显示，是的话不作处理，不是的话，把状态设置为结束激活，计数器结束后，停止显示
+
+UIActivityIndicatorVIew+AFNetworking:分类，将UIActicityIndicatorView与Task绑定，监听task的生命周期
+	1、实现了UIActicityIndicatorView与Task绑定，监听task的生命周期，达到控制是否进行动画的目的
+
+	实现思路：
+	1、并不是直接用UIActivityIndicatorVIew监听task，而是在UIActivityIndicatorVIew分类中添加了一个联合对象observer，该observer弱引用UIActivityIndicatorVIew，observer监听task，task生命周期改变时，调用UIActivityIndicatorVIew改变状态
+
+UIRefreshControl+AFNetworking：分类，实现与UIActivityIndicatorVIew分类完全相同
+
+UIImageView+AFNetworking：通过一个共享的图片下载器来对下载图片进行控制，可以进行图片缓存且避免重复下载
+	1、实现了类属性图片下载器
+	2、实现了通过request、placeholderImage、成功失败回调setImage方法
+	3、实现了取消图片下载任务
+
+	实现思路：
+	1、添加了一个联合对象：下载凭据（可根据下载凭据是否存在查看是否有图片正在下载，存在的话在下载，不存在的话表示没有在下载）。
+	2、添加了一个图片下载器，用于管理UIImageView下的所有下载图片，可以缓存且避免重复下载
+	3、实现了通过request、placeholderImage、成功失败回调setImage方法：首先检查url，为空的话设置图片为placeholder，调用failure的block。其次检查当前request是否是正在下载的（通过下载凭据的task的originalRequest。URL.absoluteStrin判断），是的话结束方法。不是的话，取消正在下载的任务（把下载凭证设为nil），通过图片下载器获取图片缓存器，查看是否有request对应的图片存在，存在的话，如果设置了success的block，调用block，如果没有block就直接设置图片。如果不存在，则通过图片下载器启动一个下载task，在回调中记得把凭据设置为nil。
+
+UIButton+AFNetworking：实现与UIImageView相同，只不过button有两个image，一个是bgImage，一个是正常image，分开实现了。
+
+UIProgressView+AFnetworking：
+	1、实现了UIProgressView与task的绑定，可通过监听task来setProgress
+
+	实现思路：
+	1、直接用UIprogressVIew监听task（没有用中间类observer），对task的state和countOfBytesSent（Received）进行KVO监听。在监听出发函数中，state用于task结束时取消监听，count用于setProgress。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

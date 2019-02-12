@@ -1,0 +1,10 @@
+MJRefresh
+
+catagory：
+NSBundle（MJRefresh）
+	作用：从pod的bundle中获取资源
+	1、提供pod的bundle获取方法：使用bundleForClass获取框架类的bundle，之后找到框架中对应的bundle文件的path
+	2、提供从bundle中获取image的方法：imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate根据tint color渲染
+	3、从bundle中读取国际化本地字符串：【bundle localizedStringForKey：value：table】
+
+UIScrollViwe（MJExtension）

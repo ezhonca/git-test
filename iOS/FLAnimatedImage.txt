@@ -1,0 +1,20 @@
+FLAnimatedImage
+
+
+FLAnimatedImage:
+	将NSData转化为gif动图。
+	1、property：封面image、size、loopcount、delaytimeDIc、framecount、frame最大缓存size、当前缓存size、data
+	2、提供了根据data的初始化方法
+	3、提供了从image获取size方法
+	4、提供根据index获取image方法
+
+
+	实现思路：
+	1、内部拓展FLAnimatedImage (Logging)类别，使用一个logLeavel来控制测试log的输出，值得借鉴。
+	2、使用了NSProxy来避免【CADisplayLink displayLinkWithTarget:selector:】循环引用的问题，值得借鉴（也可解决NStimer的相同问题）。
+	3、通过CGImageSource将data的image的duration都提取出来放入dic中
+
+
+
+FLAnimatedImageView:
+	UIImageView的子类，使用FLAnimatedImage对animatedImage赋值，在赋值时，取出image和duration，使用CADisplayLink展示动画。

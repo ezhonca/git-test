@@ -1,0 +1,6 @@
+国际化
+
+1、APP名称国际化
+	在PROJECT.info.localizations中添加支持的语言类型-》添加InfoPlist.strins文件，在文件中分别添加CFBundleDisplayName。
+2、text国际化
+	添加Localizable.strins文件，分别在文件中添加text，之后通过NSLocalizedString(key, comment)、NSLocalizedStringFromTable或者[[NSBundle mainBundle] localizedStringForKey:(key)value:@""table:nil]调用。
