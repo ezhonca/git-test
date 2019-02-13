@@ -8,7 +8,7 @@
 
 Pod::Spec.new do |s|
   s.name         = "CZMGitTest"
-  s.version      = "0.1"
+  s.version      = "0.2"
   s.summary      = "cocoapods test"
   s.homepage     = "https://github.com/ezhonca/git-test"
   s.license      = { :type => "MIT", :file => "LICENSE" }
